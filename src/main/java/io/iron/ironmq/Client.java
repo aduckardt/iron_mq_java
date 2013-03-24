@@ -8,9 +8,8 @@ import java.io.Serializable;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.Random;
-
-import com.google.gson.Gson;
-import com.google.gson.JsonSyntaxException;
+import org.codehaus.jackson.map.JsonMappingException;
+import org.codehaus.jackson.map.ObjectMapper;
 
 /**
  * The Client class provides access to the IronMQ service.
@@ -23,6 +22,7 @@ public class Client {
     private String projectId;
     private String token;
     private Cloud cloud;
+    private ObjectMapper mapper;
 
     static {
         System.setProperty("https.protocols", "TLSv1");
@@ -36,9 +36,10 @@ public class Client {
      *
      * @param projectId A 24-character project ID.
      * @param token An OAuth token.
+     * @param Jackson object mapper for data binding
      */
-    public Client(String projectId, String token) {
-        this(projectId, token, Cloud.ironAWSUSEast);
+    public Client(String projectId, String token, ObjectMapper mapper) {
+        this(projectId, token, Cloud.ironAWSUSEast, mapper);
     }
 
     /**
@@ -49,11 +50,13 @@ public class Client {
      * @param projectId A 24-character project ID.
      * @param token An OAuth token.
      * @param cloud The cloud to use.
+     * @param Jackson object mapper for data binding
      */
-    public Client(String projectId, String token, Cloud cloud) {
+    public Client(String projectId, String token, Cloud cloud, ObjectMapper mapper) {
         this.projectId = projectId;
         this.token = token;
         this.cloud = cloud;
+        this.mapper = mapper;
     }
 
     /**
@@ -76,6 +79,12 @@ public class Client {
 
     Reader post(String endpoint, String body) throws IOException {
         return request("POST", endpoint, body);
+    }
+    
+    
+
+    public ObjectMapper getMapper() {
+        return mapper;
     }
 
     private Reader request(String method, String endpoint, String body) throws IOException {
@@ -136,10 +145,9 @@ public class Client {
                 InputStreamReader reader = null;
                 try {
                     reader = new InputStreamReader(conn.getErrorStream());
-                    Gson gson = new Gson();
-                    Error error = gson.fromJson(reader, Error.class);
+                    Error error = mapper.readValue(reader, Error.class);
                     msg = error.msg;
-                } catch (JsonSyntaxException e) {
+                } catch (JsonMappingException e) {
                     msg = "IronMQ's response contained invalid JSON";
                 } finally {
                     if (reader != null)

@@ -1,7 +1,7 @@
 package io.iron.ironmq;
 
 import java.io.IOException;
-
+import org.codehaus.jackson.map.ObjectMapper;
 import org.junit.Assert;
 import org.junit.Assume;
 import org.junit.Before;
@@ -18,7 +18,7 @@ public class IronMQTest {
     }
 
     @Test public void testClient() throws IOException {
-        Client c = new Client(projectId, token, Cloud.ironAWSUSEast);
+        Client c = new Client(projectId, token, Cloud.ironAWSUSEast,new ObjectMapper());
         Queue q = c.queue("test-queue");
 
         q.clear();
@@ -39,7 +39,7 @@ public class IronMQTest {
 
     @Test(expected=HTTPException.class) public void testErrorResponse() throws IOException {
         // intentionally invalid project/token combination
-        Client c = new Client("4444444444444", "aaaaaa", Cloud.ironAWSUSEast);
+        Client c = new Client("4444444444444", "aaaaaa", Cloud.ironAWSUSEast,new ObjectMapper());
         Queue q = c.queue("test-queue");
 
         q.push("test");

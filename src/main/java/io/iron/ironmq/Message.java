@@ -1,8 +1,7 @@
 package io.iron.ironmq;
 
 import java.io.Serializable;
-
-import com.google.gson.annotations.SerializedName;
+import org.codehaus.jackson.annotate.JsonProperty;
 
 /**
  * The Message class represents a message retrieved from an IronMQ queue.
@@ -15,7 +14,7 @@ public class Message implements Serializable {
     // Long, not long, so that it's nullable. Gson doesn't serialize null,
     // so we can use the default on the server and not have to know about
     // it.
-    @SerializedName("expires_in") private Long expiresIn;
+    @JsonProperty("expires_in") private Long expiresIn;
 
     public Message() {}
 

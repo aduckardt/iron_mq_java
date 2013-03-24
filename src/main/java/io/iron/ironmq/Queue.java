@@ -3,8 +3,12 @@ package io.iron.ironmq;
 import java.io.IOException;
 import java.io.Reader;
 import java.io.Serializable;
-
-import com.google.gson.Gson;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import org.codehaus.jackson.JsonGenerationException;
+import org.codehaus.jackson.annotate.JsonProperty;
+import org.codehaus.jackson.map.JsonMappingException;
 
 /**
  * The Queue class represents a specific IronMQ queue bound to a client.
@@ -61,11 +65,13 @@ public class Queue {
     */
     public Messages get(int numberOfMessages, int timeout) throws IOException {
         if (numberOfMessages < 0 || numberOfMessages > 100) {
-            throw new IllegalArgumentException("numberOfMessages has to be within 1..100");
+            throw new IllegalArgumentException(
+                    "numberOfMessages has to be within 1..100");
         }
-        Reader reader = client.get("queues/" + name + "/messages?n="+numberOfMessages+"&timeout=" + timeout);
-        Gson gson = new Gson();
-        Messages messages = gson.fromJson(reader, Messages.class);
+        Reader reader = client.get("queues/" + name + "/messages?n="
+                + numberOfMessages + "&timeout=" + timeout);
+        Messages messages = client.getMapper()
+                .readValue(reader, Messages.class);
         reader.close();
         return messages;
     }
@@ -148,7 +154,8 @@ public class Queue {
     * @throws HTTPException If the IronMQ service returns a status other than 200 OK.
     * @throws IOException If there is an error accessing the IronMQ server.
     */
-    public String push(String msg, long timeout, long delay, long expiresIn) throws IOException {
+    public String push(String msg, long timeout, long delay, long expiresIn)
+            throws IOException {
         Message message = new Message();
         message.setBody(msg);
         message.setTimeout(timeout);
@@ -156,13 +163,79 @@ public class Queue {
         message.setExpiresIn(expiresIn);
 
         Messages msgs = new Messages(message);
-        Gson gson = new Gson();
-        String body = gson.toJson(msgs);
+        String body = client.getMapper().writeValueAsString(msgs);
 
         Reader reader = client.post("queues/" + name + "/messages", body);
-        Ids ids = gson.fromJson(reader, Ids.class);
+        Ids ids = client.getMapper().readValue(reader, Ids.class);
         reader.close();
         return ids.getId(0);
+    }
+
+    /**
+     * Subscribe endpoints to a queue. This method will add unicast subscriber
+     * @param subcrEndpoints
+     * @return nothing. TO-DO return ironmq response for adding subscribers
+     * @throws IOException 
+     * @throws JsonMappingException 
+     * @throws JsonGenerationException 
+     */
+    public void subscribers(String... subcrEndpoints) throws JsonGenerationException, JsonMappingException, IOException {
+        subscribers(PushType.unicast,subcrEndpoints);
+    }
+
+    /**
+     * Subscribe endpoints to a queue. This method will add unicast subscriber.
+     * Currently no response is returned.
+     * @param subcrEndpoints
+     * @param pushType. unicast or multicast
+     * @return nothing. TO-DO return ironmq response for adding subscribers 
+     * @throws IOException 
+     * @throws JsonMappingException 
+     * @throws JsonGenerationException 
+     */
+    public void subscribers(PushType pushType, String... subcrEndpoints) throws JsonGenerationException, JsonMappingException, IOException {
+        subscribers(pushType,Subscriber.RETRIES_COUNT,subcrEndpoints);
+    }
+    
+    /**
+     * Subscribe endpoints to a queue. This method will add unicast subscriber.
+     * Currently no response is returned.
+     * @param subcrEndpoints
+     * @param pushType. unicast or multicast 
+     * @param retries. Number of retries to push subscriber
+     * @return nothing. TO-DO return ironmq response for adding subscribers
+     * @throws IOException 
+     * @throws JsonMappingException 
+     * @throws JsonGenerationException 
+     */
+    public void subscribers(PushType pushType, int retries, String... subcrEndpoints) throws JsonGenerationException, JsonMappingException, IOException {
+        subscribers(pushType,Subscriber.RETRIES_COUNT,Subscriber.RETRIES_DELAY,subcrEndpoints);
+    }
+    
+    /**
+     * Subscribe endpoints to a queue. This method will add unicast subscriber.
+     * Currently no response is returned.
+     * TO-DO return ironmq response for adding subscribers 
+     * @param subcrEndpoints
+     * @param pushType. unicast or multicast 
+     * @param retries. Number of retries to push subscriber
+     * @param retriesDelay. Delay between retries in seconds
+     * @return
+     * @throws IOException 
+     * @throws JsonMappingException 
+     * @throws JsonGenerationException 
+     */
+    public void subscribers(PushType pushType, int retries,int retriesDelay, String... subcrEndpoints) throws JsonGenerationException, JsonMappingException, IOException {
+        assert(subcrEndpoints != null && subcrEndpoints.length >0);
+        
+        Subscriber subscriber = new Subscriber();
+        subscriber.pushType = pushType.name();
+        subscriber.retries = retries;
+        subscriber.retriesDelay = retriesDelay;
+        for (final String endpoint : subcrEndpoints) 
+            subscriber.endpoints.add(new HashMap<String, String>(){{
+                put(Subscriber.URL_KEY, endpoint);}});
+        client.post("queues/"+name+"/subscribers", client.getMapper().writeValueAsString(subscriber)).close();
     }
 
     /**
@@ -171,18 +244,33 @@ public class Queue {
      * @throws IOException
      */
     public void clear() throws IOException {
-        client.post("queues/"+name+"/clear", "").close();
+        client.post("queues/" + name + "/clear", "").close();
     }
 
     static class Info implements Serializable {
         int count;
         int size;
     }
+    
+    static class Subscriber implements Serializable {
+        static final int RETRIES_COUNT = 3;
+        static final int RETRIES_DELAY = 60;
+        static final String URL_KEY = "url";
+        int retries;
+        @JsonProperty("retries_delay") int retriesDelay;
+        @JsonProperty("push_type") String pushType;
+        @JsonProperty("subscribers") List<HashMap<String,String>> endpoints = new ArrayList<HashMap<String,String>>();
+
+        public Subscriber() {
+        }
+        
+    }
+    
+    
 
     public int getSize() throws IOException {
-        Reader reader = client.get("queues/"+name);
-        Gson gson = new Gson();
-        Info info = gson.fromJson(reader, Info.class);
+        Reader reader = client.get("queues/" + name);
+        Info info = client.getMapper().readValue(reader, Info.class);
         reader.close();
         return info.size;
     }
