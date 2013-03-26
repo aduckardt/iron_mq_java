@@ -1,6 +1,8 @@
 package io.iron.ironmq;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.Reader;
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -110,7 +112,7 @@ public class Queue {
     * @throws IOException If there is an error accessing the IronMQ server.
     */
     public String push(String msg) throws IOException {
-        return push(msg, 0);
+        return push(msg, null);
     }
 
     /**
@@ -123,8 +125,8 @@ public class Queue {
     * @throws HTTPException If the IronMQ service returns a status other than 200 OK.
     * @throws IOException If there is an error accessing the IronMQ server.
     */
-    public String push(String msg, long timeout) throws IOException {
-        return push(msg, timeout, 0);
+    public String push(String msg, Long timeout) throws IOException {
+        return push(msg, timeout, null);
     }
 
     /**
@@ -138,8 +140,8 @@ public class Queue {
     * @throws HTTPException If the IronMQ service returns a status other than 200 OK.
     * @throws IOException If there is an error accessing the IronMQ server.
     */
-    public String push(String msg, long timeout, long delay) throws IOException {
-        return push(msg, timeout, delay, 0);
+    public String push(String msg, Long timeout, Long delay) throws IOException {
+        return push(msg, timeout, delay, null);
     }
 
     /**
@@ -154,7 +156,7 @@ public class Queue {
     * @throws HTTPException If the IronMQ service returns a status other than 200 OK.
     * @throws IOException If there is an error accessing the IronMQ server.
     */
-    public String push(String msg, long timeout, long delay, long expiresIn)
+    public String push(String msg, Long timeout, Long delay, Long expiresIn)
             throws IOException {
         Message message = new Message();
         message.setBody(msg);
@@ -166,9 +168,19 @@ public class Queue {
         String body = client.getMapper().writeValueAsString(msgs);
 
         Reader reader = client.post("queues/" + name + "/messages", body);
-        Ids ids = client.getMapper().readValue(reader, Ids.class);
-        reader.close();
-        return ids.getId(0);
+        BufferedReader bufReader = null;
+        StringBuilder sb = new StringBuilder();
+        try {
+            bufReader = new BufferedReader(reader);
+            while((msg=bufReader.readLine()) != null)
+                sb.append(msg);
+        } catch (JsonMappingException e) {
+            msg = "IronMQ's response contained invalid JSON";
+        } finally {
+            if (reader != null)
+                reader.close();
+        }
+        return sb.toString();
     }
 
     /**
@@ -247,6 +259,13 @@ public class Queue {
         client.post("queues/" + name + "/clear", "").close();
     }
 
+    public int getSize() throws IOException {
+        Reader reader = client.get("queues/" + name);
+        Info info = client.getMapper().readValue(reader, Info.class);
+        reader.close();
+        return info.size;
+    }
+
     static class Info implements Serializable {
         int count;
         int size;
@@ -264,14 +283,5 @@ public class Queue {
         public Subscriber() {
         }
         
-    }
-    
-    
-
-    public int getSize() throws IOException {
-        Reader reader = client.get("queues/" + name);
-        Info info = client.getMapper().readValue(reader, Info.class);
-        reader.close();
-        return info.size;
     }
 }

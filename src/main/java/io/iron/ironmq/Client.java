@@ -1,5 +1,6 @@
 package io.iron.ironmq;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
@@ -80,8 +81,6 @@ public class Client {
     Reader post(String endpoint, String body) throws IOException {
         return request("POST", endpoint, body);
     }
-    
-    
 
     public ObjectMapper getMapper() {
         return mapper;
@@ -140,13 +139,16 @@ public class Client {
 
         int status = conn.getResponseCode();
         if (status != 200) {
+            StringBuilder sb=  new StringBuilder();
             String msg;
             if (conn.getContentLength() > 0 && conn.getContentType().equals("application/json")) {
-                InputStreamReader reader = null;
+                BufferedReader reader = null;
                 try {
-                    reader = new InputStreamReader(conn.getErrorStream());
-                    Error error = mapper.readValue(reader, Error.class);
-                    msg = error.msg;
+                    reader = new BufferedReader(new InputStreamReader(conn.getErrorStream()));
+                    while((msg=reader.readLine()) != null)
+                        sb.append(msg);
+//                    Error error = mapper.readValue(reader, Error.class);
+                    msg = sb.toString();
                 } catch (JsonMappingException e) {
                     msg = "IronMQ's response contained invalid JSON";
                 } finally {

@@ -2,15 +2,17 @@ package io.iron.ironmq;
 
 import java.io.Serializable;
 import org.codehaus.jackson.annotate.JsonProperty;
+import org.codehaus.jackson.annotate.JsonRawValue;
 
 /**
  * The Message class represents a message retrieved from an IronMQ queue.
  */
 public class Message implements Serializable {
     private String id;
+//    @JsonRawValue
     private String body;
-    private long timeout;
-    private long delay;
+    private Long timeout;
+    private Long delay;
     // Long, not long, so that it's nullable. Gson doesn't serialize null,
     // so we can use the default on the server and not have to know about
     // it.
@@ -45,36 +47,33 @@ public class Message implements Serializable {
     /**
     * Returns the Message's timeout.
     */
-    public long getTimeout() { return timeout; }
+    public Long getTimeout() { return timeout; }
 
     /**
     * Sets the Message's timeout.
     *
     * @param timeout The new timeout.
     */
-    public void setTimeout(long timeout) { this.timeout = timeout; }
+    public void setTimeout(Long timeout) { this.timeout = timeout; }
 
     /**
     * Returns the number of seconds after which the Message will be available.
     */
-    public long getDelay() { return delay; }
+    public Long getDelay() { return delay; }
 
     /**
     * Sets the number of seconds after which the Message will be available.
     *
     * @param delay The new delay.
     */
-    public void setDelay(long delay) { this.delay = delay; }
+    public void setDelay(Long delay) { this.delay = delay; }
 
     /**
     * Returns the number of seconds in which the Message will be removed from the
     * queue. If the server default of 7 days will be used, 0 is returned.
     */
-    public long getExpiresIn() {
-        if (this.expiresIn == null) {
-            return 0;
-        }
-        return this.expiresIn.longValue();
+    public Long getExpiresIn() {
+        return this.expiresIn;
     }
 
     /**
@@ -84,12 +83,8 @@ public class Message implements Serializable {
     * @param expiresIn The new expiration offset in seconds. A value less than
     * or equal to 0 will cause the server default of 7 days to be used.
     */
-    public void setExpiresIn(long expiresIn) {
-        if (expiresIn > 0) {
-            this.expiresIn = Long.valueOf(expiresIn);
-        } else {
-            this.expiresIn = null;
-        }
+    public void setExpiresIn(Long expiresIn) {
+            this.expiresIn = expiresIn;
     }
 
     /**
