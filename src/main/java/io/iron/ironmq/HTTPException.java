@@ -6,6 +6,7 @@ import java.io.IOException;
  * The HTTPException class represents an HTTP response status that is not 200 OK.
  */
 public class HTTPException extends IOException {
+    private static final long serialVersionUID = 1L;
     private int status;
 
     /**

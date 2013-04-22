@@ -3,6 +3,7 @@ package io.iron.ironmq;
 public class Messages {
     private Message[] messages;
 
+    public Messages() {}
     public Messages(Message... msgs) {
         messages = msgs;
     }

@@ -1,27 +1,35 @@
 package io.iron.ironmq;
 
-import java.io.BufferedReader;
+import io.iron.ironmq.util.MessageBodyInflater;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.Reader;
+import java.io.InputStream;
 import java.io.Serializable;
-import java.util.ArrayList;
+import java.nio.charset.Charset;
 import java.util.HashMap;
-import java.util.List;
+import java.util.zip.Deflater;
+import java.util.zip.DeflaterOutputStream;
+import org.apache.commons.codec.binary.Base64;
 import org.codehaus.jackson.JsonGenerationException;
-import org.codehaus.jackson.annotate.JsonProperty;
 import org.codehaus.jackson.map.JsonMappingException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The Queue class represents a specific IronMQ queue bound to a client.
  */
 public class Queue {
+    Logger log = LoggerFactory.getLogger(getClass());
     final private Client client;
     final private String name;
+    final private String baseUrl;
 
     public Queue(Client client, String name) {
         this.client = client;
         this.name = name;
+        this.baseUrl = new StringBuilder().append("queues/").append(name)
+                .append("/messages").toString();
     }
 
     /**
@@ -32,7 +40,7 @@ public class Queue {
     * @throws HTTPException If the IronMQ service returns a status other than 200 OK.
     * @throws IOException If there is an error accessing the IronMQ server.
     */
-    public Message get() throws IOException {
+    public Message get() throws Exception {
         Messages msgs = get(1);
         Message msg;
         try {
@@ -52,8 +60,14 @@ public class Queue {
     * @throws HTTPException If the IronMQ service returns a status other than 200 OK.
     * @throws IOException If there is an error accessing the IronMQ server.
     */
-    public Messages get(int numberOfMessages) throws IOException {
-        return get(numberOfMessages, 120);
+    public Messages get(int numberOfMessages) throws Exception {
+        Messages msgs = get(numberOfMessages, 120);
+        if (msgs != null) {
+            for (Message msg : msgs.getMessages()) {
+                msg.setBody(MessageBodyInflater.inflateBody(msg.getBody()));
+            }
+        }
+        return msgs;
     }
 
     /**
@@ -70,12 +84,9 @@ public class Queue {
             throw new IllegalArgumentException(
                     "numberOfMessages has to be within 1..100");
         }
-        Reader reader = client.get("queues/" + name + "/messages?n="
-                + numberOfMessages + "&timeout=" + timeout);
-        Messages messages = client.getMapper()
-                .readValue(reader, Messages.class);
-        reader.close();
-        return messages;
+        return client.get(new StringBuilder(baseUrl).append("?n=")
+                .append(numberOfMessages).append("&timeout=").append(timeout)
+                .toString());
     }
 
     /**
@@ -87,7 +98,8 @@ public class Queue {
     * @throws IOException If there is an error accessing the IronMQ server.
     */
     public void deleteMessage(String id) throws IOException {
-        client.delete("queues/" + name + "/messages/" + id);
+        client.delete(new StringBuilder(baseUrl).append("/").append(id)
+                .toString());
     }
 
     /**
@@ -111,7 +123,7 @@ public class Queue {
     * @throws HTTPException If the IronMQ service returns a status other than 200 OK.
     * @throws IOException If there is an error accessing the IronMQ server.
     */
-    public String push(String msg) throws IOException {
+    public String push(String msg) throws Exception {
         return push(msg, null);
     }
 
@@ -125,8 +137,8 @@ public class Queue {
     * @throws HTTPException If the IronMQ service returns a status other than 200 OK.
     * @throws IOException If there is an error accessing the IronMQ server.
     */
-    public String push(String msg, Long timeout) throws IOException {
-        return push(msg, timeout, null);
+    public String push(String msg, Long expiresIn) throws Exception {
+        return push(msg, expiresIn, null);
     }
 
     /**
@@ -140,8 +152,9 @@ public class Queue {
     * @throws HTTPException If the IronMQ service returns a status other than 200 OK.
     * @throws IOException If there is an error accessing the IronMQ server.
     */
-    public String push(String msg, Long timeout, Long delay) throws IOException {
-        return push(msg, timeout, delay, null);
+    public String push(String msg, Long expiresIn, Long timeout)
+            throws Exception {
+        return push(msg, expiresIn, timeout, null);
     }
 
     /**
@@ -156,31 +169,43 @@ public class Queue {
     * @throws HTTPException If the IronMQ service returns a status other than 200 OK.
     * @throws IOException If there is an error accessing the IronMQ server.
     */
-    public String push(String msg, Long timeout, Long delay, Long expiresIn)
-            throws IOException {
+    public String push(String msg, Long expiresIn, Long timeout, Long delay)
+            throws Exception {
         Message message = new Message();
-        message.setBody(msg);
+        byte[] msgBytes = msg.getBytes(Charset.forName("UTF-8"));
+        log.debug("Original message length: {} bytes", msg.length());
+        byte[] zippedBytes;
+        InputStream bis = new ByteArrayInputStream(msgBytes);
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        DeflaterOutputStream dos = new DeflaterOutputStream(bos, new Deflater(
+                Deflater.BEST_COMPRESSION));
+        try {
+            MessageBodyInflater.getBytes(bis, dos);
+            dos.finish();
+            bos.flush();
+            zippedBytes = bos.toByteArray();
+            message.setBody(Base64.encodeBase64URLSafeString(zippedBytes));
+            log.debug("Compressed message length: {} bytes", message.getBody()
+                    .length());
+        } finally {
+            if (bis != null)
+                bis.close();
+            bis = null;
+            if (bos != null)
+                bos.close();
+            bos = null;
+            if (dos != null)
+                dos.close();
+            dos = null;
+        }
         message.setTimeout(timeout);
         message.setDelay(delay);
         message.setExpiresIn(expiresIn);
 
         Messages msgs = new Messages(message);
-        String body = client.getMapper().writeValueAsString(msgs);
+        // String body = client.getMapper().writeValueAsString(msgs);
 
-        Reader reader = client.post("queues/" + name + "/messages", body);
-        BufferedReader bufReader = null;
-        StringBuilder sb = new StringBuilder();
-        try {
-            bufReader = new BufferedReader(reader);
-            while((msg=bufReader.readLine()) != null)
-                sb.append(msg);
-        } catch (JsonMappingException e) {
-            msg = "IronMQ's response contained invalid JSON";
-        } finally {
-            if (reader != null)
-                reader.close();
-        }
-        return sb.toString();
+        return client.post(baseUrl, msgs);
     }
 
     /**
@@ -191,8 +216,9 @@ public class Queue {
      * @throws JsonMappingException 
      * @throws JsonGenerationException 
      */
-    public void subscribers(String... subcrEndpoints) throws JsonGenerationException, JsonMappingException, IOException {
-        subscribers(PushType.unicast,subcrEndpoints);
+    public void subscribers(String... subcrEndpoints)
+            throws JsonGenerationException, JsonMappingException, IOException {
+        subscribers(PushType.unicast, subcrEndpoints);
     }
 
     /**
@@ -205,10 +231,11 @@ public class Queue {
      * @throws JsonMappingException 
      * @throws JsonGenerationException 
      */
-    public void subscribers(PushType pushType, String... subcrEndpoints) throws JsonGenerationException, JsonMappingException, IOException {
-        subscribers(pushType,Subscriber.RETRIES_COUNT,subcrEndpoints);
+    public void subscribers(PushType pushType, String... subcrEndpoints)
+            throws JsonGenerationException, JsonMappingException, IOException {
+        subscribers(pushType, Subscriber.RETRIES_COUNT, subcrEndpoints);
     }
-    
+
     /**
      * Subscribe endpoints to a queue. This method will add unicast subscriber.
      * Currently no response is returned.
@@ -220,10 +247,13 @@ public class Queue {
      * @throws JsonMappingException 
      * @throws JsonGenerationException 
      */
-    public void subscribers(PushType pushType, int retries, String... subcrEndpoints) throws JsonGenerationException, JsonMappingException, IOException {
-        subscribers(pushType,Subscriber.RETRIES_COUNT,Subscriber.RETRIES_DELAY,subcrEndpoints);
+    public void subscribers(PushType pushType, int retries,
+            String... subcrEndpoints) throws JsonGenerationException,
+            JsonMappingException, IOException {
+        subscribers(pushType, Subscriber.RETRIES_COUNT,
+                Subscriber.RETRIES_DELAY, subcrEndpoints);
     }
-    
+
     /**
      * Subscribe endpoints to a queue. This method will add unicast subscriber.
      * Currently no response is returned.
@@ -237,17 +267,21 @@ public class Queue {
      * @throws JsonMappingException 
      * @throws JsonGenerationException 
      */
-    public void subscribers(PushType pushType, int retries,int retriesDelay, String... subcrEndpoints) throws JsonGenerationException, JsonMappingException, IOException {
-        assert(subcrEndpoints != null && subcrEndpoints.length >0);
-        
+    public void subscribers(PushType pushType, int retries, int retriesDelay,
+            String... subcrEndpoints) throws JsonGenerationException,
+            JsonMappingException, IOException {
+        assert (subcrEndpoints != null && subcrEndpoints.length > 0);
+
         Subscriber subscriber = new Subscriber();
         subscriber.pushType = pushType.name();
         subscriber.retries = retries;
         subscriber.retriesDelay = retriesDelay;
-        for (final String endpoint : subcrEndpoints) 
-            subscriber.endpoints.add(new HashMap<String, String>(){{
-                put(Subscriber.URL_KEY, endpoint);}});
-        client.post("queues/"+name+"/subscribers", client.getMapper().writeValueAsString(subscriber)).close();
+        for (final String endpoint : subcrEndpoints) {
+            HashMap<String, String> endpointMap = new HashMap<String, String>();
+            endpointMap.put(Subscriber.URL_KEY, endpoint);
+            subscriber.endpoints.add(endpointMap);
+        }
+        client.post(new StringBuilder().append("queues/").append(name).append("/subscribers").toString(), subscriber);
     }
 
     /**
@@ -256,32 +290,13 @@ public class Queue {
      * @throws IOException
      */
     public void clear() throws IOException {
-        client.post("queues/" + name + "/clear", "").close();
-    }
-
-    public int getSize() throws IOException {
-        Reader reader = client.get("queues/" + name);
-        Info info = client.getMapper().readValue(reader, Info.class);
-        reader.close();
-        return info.size;
+        client.post(new StringBuilder("queues/").append(name).append("/clear").toString(), "");
     }
 
     static class Info implements Serializable {
+        private static final long serialVersionUID = 1L;
         int count;
         int size;
     }
-    
-    static class Subscriber implements Serializable {
-        static final int RETRIES_COUNT = 3;
-        static final int RETRIES_DELAY = 60;
-        static final String URL_KEY = "url";
-        int retries;
-        @JsonProperty("retries_delay") int retriesDelay;
-        @JsonProperty("push_type") String pushType;
-        @JsonProperty("subscribers") List<HashMap<String,String>> endpoints = new ArrayList<HashMap<String,String>>();
 
-        public Subscriber() {
-        }
-        
-    }
 }

@@ -4,8 +4,6 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
-import java.io.Reader;
-import java.io.Serializable;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.Random;
@@ -20,10 +18,10 @@ public class Client {
 
     static final Random rand = new Random();
 
-    private String projectId;
     private String token;
     private Cloud cloud;
     private ObjectMapper mapper;
+    final String path;
 
     static {
         System.setProperty("https.protocols", "TLSv1");
@@ -53,11 +51,13 @@ public class Client {
      * @param cloud The cloud to use.
      * @param Jackson object mapper for data binding
      */
-    public Client(String projectId, String token, Cloud cloud, ObjectMapper mapper) {
-        this.projectId = projectId;
+    public Client(String projectId, String token, Cloud cloud,
+            ObjectMapper mapper) {
         this.token = token;
         this.cloud = cloud;
         this.mapper = mapper;
+        this.path = new StringBuilder().append("/").append(apiVersion)
+                .append("/projects/").append(projectId).append("/").toString();
     }
 
     /**
@@ -70,15 +70,23 @@ public class Client {
         return new Queue(this, name);
     }
 
-    Reader delete(String endpoint) throws IOException {
+    String delete(String endpoint) throws IOException {
         return request("DELETE", endpoint, null);
     }
 
-    Reader get(String endpoint) throws IOException {
-        return request("GET", endpoint, null);
+    Messages get(String endpoint) throws IOException {
+        return mapper.readValue(request("GET", endpoint, null), Messages.class);
     }
 
-    Reader post(String endpoint, String body) throws IOException {
+    String post(String endpoint, Messages body) throws IOException {
+        return request("POST", endpoint, mapper.writeValueAsString(body));
+    }
+
+    String post(String endpoint, Subscriber body) throws IOException {
+        return request("POST", endpoint, mapper.writeValueAsString(body));
+    }
+
+    String post(String endpoint, String body) throws IOException {
         return request("POST", endpoint, body);
     }
 
@@ -86,9 +94,10 @@ public class Client {
         return mapper;
     }
 
-    private Reader request(String method, String endpoint, String body) throws IOException {
-        String path = "/" + apiVersion + "/projects/" + projectId + "/" + endpoint;
-        URL url = new URL(cloud.scheme, cloud.host, cloud.port, path);
+    private String request(String method, String endpoint, String body)
+            throws IOException {
+        String endpointPath = new StringBuilder(path).append(endpoint).toString();
+        URL url = new URL(cloud.scheme, cloud.host, cloud.port, endpointPath);
 
         final int maxRetries = 5;
         int retries = 0;
@@ -103,7 +112,7 @@ public class Client {
                 }
                 retries++;
                 // random delay between 0 and 4^tries*100 milliseconds
-                int pow = (1 << (2*retries))*100;
+                int pow = (1 << (2 * retries)) * 100;
                 int delay = rand.nextInt(pow);
                 try {
                     Thread.sleep(delay);
@@ -114,11 +123,9 @@ public class Client {
         }
     }
 
-    static private class Error implements Serializable {
-        String msg;
-    }
-
-    private Reader singleRequest(String method, URL url, String body) throws IOException {
+    private String singleRequest(String method, URL url, String body)
+            throws IOException {
+        String result;
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod(method);
         conn.setRequestProperty("Authorization", "OAuth " + token);
@@ -132,36 +139,55 @@ public class Client {
         conn.connect();
 
         if (body != null) {
-            OutputStreamWriter out = new OutputStreamWriter(conn.getOutputStream());
+            OutputStreamWriter out = new OutputStreamWriter(
+                    conn.getOutputStream());
             out.write(body);
             out.close();
         }
 
         int status = conn.getResponseCode();
         if (status != 200) {
-            StringBuilder sb=  new StringBuilder();
+            StringBuilder sb = new StringBuilder();
             String msg;
-            if (conn.getContentLength() > 0 && conn.getContentType().equals("application/json")) {
+            if (conn.getContentLength() > 0
+                    && conn.getContentType().equals("application/json")) {
                 BufferedReader reader = null;
                 try {
-                    reader = new BufferedReader(new InputStreamReader(conn.getErrorStream()));
-                    while((msg=reader.readLine()) != null)
+                    reader = new BufferedReader(new InputStreamReader(
+                            conn.getErrorStream()));
+                    while ((msg = reader.readLine()) != null)
                         sb.append(msg);
-//                    Error error = mapper.readValue(reader, Error.class);
+                    // Error error = mapper.readValue(reader, Error.class);
                     msg = sb.toString();
                 } catch (JsonMappingException e) {
                     msg = "IronMQ's response contained invalid JSON";
                 } finally {
                     if (reader != null)
                         reader.close();
+                    reader = null;
                 }
             } else {
                 msg = "Empty or non-JSON response";
             }
             throw new HTTPException(status, msg);
         }
+        BufferedReader br = null;
+        StringBuilder sb = new StringBuilder();
+        try {
+            br = new BufferedReader(
+                    new InputStreamReader(conn.getInputStream()));
+            String line;
 
-        return new InputStreamReader(conn.getInputStream());
+            while ((line = br.readLine()) != null)
+                sb.append(line);
+            result = sb.toString();
+        } finally {
+            if (br != null)
+                br.close();
+            br = null;
+            sb.setLength(0);
+            sb = null;
+        }
+        return result;
     }
 }
-
