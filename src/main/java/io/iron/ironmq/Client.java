@@ -2,6 +2,7 @@ package io.iron.ironmq;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.net.HttpURLConnection;
@@ -9,19 +10,22 @@ import java.net.URL;
 import java.util.Random;
 import org.codehaus.jackson.map.JsonMappingException;
 import org.codehaus.jackson.map.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The Client class provides access to the IronMQ service.
  */
 public class Client {
     static final private String apiVersion = "1";
+    Logger log = LoggerFactory.getLogger(getClass());
 
     static final Random rand = new Random();
 
-    private String token;
     private Cloud cloud;
     private ObjectMapper mapper;
     final String path;
+    final String oauthHeader;
 
     static {
         System.setProperty("https.protocols", "TLSv1");
@@ -53,7 +57,7 @@ public class Client {
      */
     public Client(String projectId, String token, Cloud cloud,
             ObjectMapper mapper) {
-        this.token = token;
+        this.oauthHeader = "OAuth " + token;
         this.cloud = cloud;
         this.mapper = mapper;
         this.path = new StringBuilder().append("/").append(apiVersion)
@@ -96,7 +100,8 @@ public class Client {
 
     private String request(String method, String endpoint, String body)
             throws IOException {
-        String endpointPath = new StringBuilder(path).append(endpoint).toString();
+        String endpointPath = new StringBuilder(path).append(endpoint)
+                .toString();
         URL url = new URL(cloud.scheme, cloud.host, cloud.port, endpointPath);
 
         final int maxRetries = 5;
@@ -128,11 +133,16 @@ public class Client {
         String result;
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod(method);
-        conn.setRequestProperty("Authorization", "OAuth " + token);
-        conn.setRequestProperty("User-Agent", "IronMQ Java Client");
-
+        conn.setRequestProperty(HttpRequestHeader.AUTHORIZATION, oauthHeader);
+        conn.setRequestProperty(HttpRequestHeader.USER_AGENT,
+                "IronMQ Java Client");
         if (body != null) {
-            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setRequestProperty(HttpRequestHeader.CONTENT_TYPE,
+                    HttpRequestHeader.JSON_TYPE);
+            conn.setRequestProperty(HttpRequestHeader.CONTENT_LENGTH,
+                    Integer.toString(body.length()));
+            conn.setRequestProperty(HttpRequestHeader.CONNECTION,
+                    HttpRequestHeader.CLOSE);
             conn.setDoOutput(true);
         }
 
@@ -142,19 +152,21 @@ public class Client {
             OutputStreamWriter out = new OutputStreamWriter(
                     conn.getOutputStream());
             out.write(body);
+            out.flush();
             out.close();
         }
-
+        InputStream is = null;
         int status = conn.getResponseCode();
         if (status != 200) {
             StringBuilder sb = new StringBuilder();
             String msg;
             if (conn.getContentLength() > 0
-                    && conn.getContentType().equals("application/json")) {
+                    && HttpRequestHeader.JSON_TYPE
+                            .equals(conn.getContentType())) {
                 BufferedReader reader = null;
                 try {
-                    reader = new BufferedReader(new InputStreamReader(
-                            conn.getErrorStream()));
+                    is = conn.getErrorStream();
+                    reader = new BufferedReader(new InputStreamReader(is));
                     while ((msg = reader.readLine()) != null)
                         sb.append(msg);
                     // Error error = mapper.readValue(reader, Error.class);
@@ -162,9 +174,26 @@ public class Client {
                 } catch (JsonMappingException e) {
                     msg = "IronMQ's response contained invalid JSON";
                 } finally {
-                    if (reader != null)
-                        reader.close();
+                    try {
+                        if (is != null)
+                            is.close();
+                    } catch (Exception e) {
+                        log.warn(e.getMessage(), e);
+                    }
+                    is = null;
+                    try {
+                        if (reader != null)
+                            reader.close();
+                    } catch (Exception e) {
+                        log.warn(e.getMessage(), e);
+                    }
                     reader = null;
+                    try {
+                        conn.disconnect();
+                    } catch (Exception e) {
+                        log.warn(e.getMessage(), e);
+                    }
+
                 }
             } else {
                 msg = "Empty or non-JSON response";
@@ -172,20 +201,37 @@ public class Client {
             throw new HTTPException(status, msg);
         }
         BufferedReader br = null;
-        StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder(1024);
         try {
-            br = new BufferedReader(
-                    new InputStreamReader(conn.getInputStream()));
+            is = conn.getInputStream();
+            br = new BufferedReader(new InputStreamReader(is));
             String line;
 
             while ((line = br.readLine()) != null)
                 sb.append(line);
             result = sb.toString();
         } finally {
-            if (br != null)
-                br.close();
+            try {
+                if (is != null)
+                    is.close();
+            } catch (Exception e) {
+                log.warn(e.getMessage(), e);
+            }
+            is = null;
+            try {
+                if (br != null)
+                    br.close();
+            } catch (Exception e) {
+                log.warn(e.getMessage(), e);
+            }
             br = null;
+            try {
+                conn.disconnect();
+            } catch (Exception e) {
+                log.warn(e.getMessage(), e);
+            }
             sb.setLength(0);
+            sb.trimToSize();
             sb = null;
         }
         return result;

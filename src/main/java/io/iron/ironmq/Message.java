@@ -2,12 +2,14 @@ package io.iron.ironmq;
 
 import java.io.Serializable;
 import org.codehaus.jackson.annotate.JsonIgnore;
+import org.codehaus.jackson.annotate.JsonIgnoreProperties;
 import org.codehaus.jackson.annotate.JsonProperty;
 import org.codehaus.jackson.annotate.JsonRawValue;
 
 /**
  * The Message class represents a message retrieved from an IronMQ queue.
  */
+@JsonIgnoreProperties(ignoreUnknown=true)
 public class Message implements Serializable {
     private static final long serialVersionUID = 1L;
     private String id;

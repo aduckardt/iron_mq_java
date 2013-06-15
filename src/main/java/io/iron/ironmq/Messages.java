@@ -1,5 +1,8 @@
 package io.iron.ironmq;
 
+import org.codehaus.jackson.annotate.JsonIgnoreProperties;
+
+@JsonIgnoreProperties(ignoreUnknown=true)
 public class Messages {
     private Message[] messages;
 
